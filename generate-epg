@@ -1,0 +1,215 @@
+#!/usr/bin/env python
+
+"""
+ODR-Bridge-EPG
+
+Feed in a multiplex configuration file and an output bitstream path.
+
+The mux config will be scanned for services linked to an EPG packet data channel. The service SI files will
+be resolved and demarshalled.
+
+These will then be combined to a multiplex SI file. This is then used to pull back logo files for each service in the 3 
+lowest sizes. Also 2 days PI files. All these are then encoded to an MOT directory bitstream.
+
+"""
+
+import argparse
+import os, sys
+from datetime import datetime, timedelta
+import urllib2
+import logging
+from json import dumps, JSONEncoder
+import random
+import string
+import re
+import logging
+
+from spi import DabBearer, IpBearer, Time, ServiceInfo, xml, binary
+
+from mot import MotObject, ContentType, SortedHeaderInformation
+from mot.epg import EpgContentType, ScopeId, ScopeStart, ScopeEnd
+
+from msc.datagroups import encode_directorymode
+from msc.packets import encode_packets
+
+
+def filter_by_bearer(service):
+    bearers = [x for x in service.bearers if isinstance(x, (DabBearer))] # can include IP bearers if you like
+    return service
+
+def get_services_for_bearers(bearers, url):
+    logger.debug('getting services for bearers from %s : %s', url, bearers)
+    response = urllib2.urlopen(url)
+    unmarshalled = xml.unmarshall(response.read())
+    services = filter(lambda s : len(filter(lambda b : b in bearers, s.bearers)) > 0, unmarshalled.services)
+    if len(services) == 0:
+        raise Error('no services found for bearers %s from url %s' % (bearers, url))
+    return services
+
+def get_filename():
+    return ''.join(random.choice(string.ascii_lowercase) for i in range(6))
+
+def encode_image(url):
+    logger.debug('encoding image from %s', url)
+    response = urllib2.urlopen(url)
+    data = response.read()
+    logger.debug('read %d bytes of image data', len(data))
+    return data
+
+parser = argparse.ArgumentParser(description='Encodes an EPG bitstream for services in a multiplex configuration file')
+parser.add_argument('f',  nargs=1, help='multiplex configuration file')
+parser.add_argument('-o', dest='output', nargs=1, help='output bitstream file')
+parser.add_argument('-X', dest='debug', action='store_true', help='turn debug on')
+parser.add_argument('-d', dest='days', nargs=1, type=int, default=2, help='number of days ahead to encode schedule files')
+args = parser.parse_args()
+
+if args.debug:
+    logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('odr.bridge.epg')
+logging.getLogger('spi.binary').setLevel(logging.INFO)
+
+# read in the mux config
+c = open(args.f[0]).read()
+
+
+class Generator:
+
+    def __init__(self, days, output):
+        self.days = days if days else 0
+        self.output = output if output else 'output.dat'
+
+    def generate_epg(self, responses):
+        # lets provision a list of the files and encoders that we'll use to assemble the directory 
+        # list of tuples: (filename, params, function, args, kwargs)
+        objects = []
+
+        # our list of services
+        all_services = []
+
+        logger.debug('responses: %s', responses)
+        for response in responses:
+            fqdn = response['fqdn']
+            bearers = response['bearers']
+            servers = response['servers']
+
+            # lets take a snapshot of ensemble ECC and EId right now, but should really take this from the mux config
+            ecc = bearers[0].ecc
+            eid = bearers[0].eid
+
+            # sort servers in priority (lowest), weighting highest
+            servers = sorted(servers, key=lambda x: (-x['priority'], x['weight']))
+
+            # acquire an SI file, starting with the lower priority
+            for server in servers:
+                domain = server['target'][:-1]
+                url = 'http://%s/radiodns/spi/3.1/SI.xml' % domain 
+                logger.debug('getting SI document from %s', url)
+                try:
+                    services = get_services_for_bearers(bearers, url)
+                except: continue # move onto the next SRV record
+                all_services.extend(services)
+
+                # encode service logos
+                logger.debug('encoding service logos')
+                for service in services: 
+                    logger.debug('encoding service logo for: %s', service)
+
+                    from spi import Multimedia
+                    for media in filter(lambda m: 
+                        m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) or
+                        (m.content in ('image/png', 'image/jpg', 'image/jpeg') and
+                         (m.width, m.height) in ((32, 32), (112, 32), (128, 128))), 
+                        service.media):
+                        
+                        # create MOT Object
+                        o = MotObject(media.url, encode_image(media.url), ContentType.IMAGE_PNG if media.content == 'image/png' or media.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) else ContentType.IMAGE_JFIF)
+                        objects.append(o)
+     
+                    # get the relevant bearer for this mux
+                    bearer = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)[0]
+
+                    # now find PI files
+                    if self.days > 0:
+                        now = datetime.today()
+                        for i in range(0, self.days):
+                            day = now + timedelta(days=i)
+                            pi_url = 'http://%s/radiodns/spi/3.1/dab/%03x/%04x/%04x/%d/%s' % (domain, ((bearer.eid >> 4 & 0xf00) + bearer.ecc), bearer.eid, bearer.sid, bearer.scids, day.strftime("%Y%m%d_PI.xml"))
+                            try:
+                                day = now + timedelta(days=i)
+                                filename = '%s_PI_%04x' % (day.strftime("%Y%m%d"), bearer.sid)
+                                logger.debug('making request for PI file to: %s', pi_url)
+                                f = urllib2.urlopen(pi_url)
+                                data = f.read()
+                                logger.debug('read %d bytes', len(data))
+                                programme_info = unmarshall(data)
+
+                                # get the right scope - not entirely clear from the specification how multiple schedules should be handled
+                                # in terms of scope signalling
+                                scope_start = None
+                                scope_end = None
+                                for schedule in programme_info.schedules:
+                                    start, end = schedule.scope
+                                    if scope_start == None or start < scope_start: scope_start = start
+                                    if scope_end == None or end > scope_end: scope_start = start
+                                    start, end = calculate_scope(schedule)
+                                    if scope_start == None or start < scope_start: scope_start = start
+                                    if scope_end == None or end > scope_end: scope_end = end
+
+                                o = MotObject(filename, marshall(programme_info), EpgContentType.PROGRAMME_INFO)
+                                o.add_parameter(ScopeId(bearer)) 
+                                o.add_parameter(ScopeStart(scope_start))
+                                o.add_parameter(ScopeEnd(scope_end))
+                                objects.append(o)
+
+                            except: 
+                                logger.warning('could not find PI file at: %s', pi_url)
+                     
+        # prepare the SI file
+        service_info = ServiceInfo()
+        logger.debug('preparing the SI file with %d services', len(all_services))
+        for service in all_services:
+            # filter out non DAB/IP bearers
+            service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
+            service_info.services.append(service)  
+
+        # add the SI file 
+        o = MotObject("si.xml", binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)), EpgContentType.SERVICE_INFORMATION)
+        o.add_parameter(ScopeId(ecc, eid))
+        objects.append(o)
+
+        logger.debug('loaded into %d MOT objects', len(objects))
+
+        # encode to datagroups
+        datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
+        logger.debug('encoded to %d datagroups', len(datagroups))
+
+        # encode to packets
+        packets = encode_packets(datagroups, address=1, size=96)
+        logger.debug('encoded to %d packets', len(packets))
+
+        # open the output file
+        w = open(self.output, 'wb')
+
+        for packet in packets:
+            w.write(packet.tobytes())
+
+
+# get the services and applications that the mux config suggests and construct a new virtual SI file
+from odr.radiodns.resolver import resolve_epg
+generator = Generator(days=args.days, output=args.output)
+resolved = resolve_epg(args.f[0], generator.generate_epg)
+
+
+def calculate_scope(schedule): # this should probably be in the main codebase
+    start, end = schedule.scope
+    if start is not None and end is not None: return (start, end)
+    if start is None:
+        for programme in schedule.programmes:
+            for location in programme.locations:
+                for time in location.times:
+                    if not isinstance(time, Time): continue
+                    if start is None or time.actual_time < start: start = time.actual_time
+                    if end is None or (time.actual_time + time.actual_duration) > end: end = (time.actual_time + time.actual_duration)
+    return (start, end)
+
+
