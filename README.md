@@ -5,11 +5,11 @@ Creates a DAB EPG bitstream directly from the ODR multiplex configuration file, 
 
 # Dependencies
 
-* (python-hybridspi)[https://github.com/magicbadger/python-hybridspi]
-* (odr-radiodns-bridge)[https://github.com/nickpiggott/odr-radiodns-bridge]
-* (python-mot)
-* (python-mot-epg)
-* (python-msc)
+* [python-hybridspi](https://github.com/magicbadger/python-hybridspi)
+* [odr-radiodns-bridge](https://github.com/nickpiggott/odr-radiodns-bridge)
+* [python-mot]
+* [python-mot-epg]
+* [python-msc]
 
 # Usage
 
