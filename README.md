@@ -1,4 +1,4 @@
 ODR Bridge EPG
 ==============
 
-This done create EPG bitstream from an ODR DabMux configuration file
+Creates a DAB EPG bitstream directly from the ODR multiplex configuration file, using RadioDNS to lookup SI and PI documents.
