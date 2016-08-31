@@ -58,9 +58,11 @@ def encode_image(url):
 
 parser = argparse.ArgumentParser(description='Encodes an EPG bitstream for services in a multiplex configuration file')
 parser.add_argument('f',  nargs=1, help='multiplex configuration file')
-parser.add_argument('-o', dest='output', nargs=1, help='output bitstream file')
+parser.add_argument('-o', dest='output', help='output bitstream file')
 parser.add_argument('-X', dest='debug', action='store_true', help='turn debug on')
-parser.add_argument('-d', dest='days', nargs=1, type=int, default=2, help='number of days ahead to encode schedule files')
+parser.add_argument('-d', dest='days', type=int, default=2, help='number of days ahead to encode schedule files')
+parser.add_argument('-p', dest='packet_size', type=int, default=96, help='Packet size in bytes')
+parser.add_argument('-a', dest='packet_address', type=int, default=1, help='Packet address')
 args = parser.parse_args()
 
 if args.debug:
@@ -71,14 +73,32 @@ logging.getLogger('spi.binary').setLevel(logging.INFO)
 # read in the mux config
 c = open(args.f[0]).read()
 
+def calculate_scope(schedule): # this should probably be in the main codebase
+    start, end = schedule.scope
+    if start is not None and end is not None: return (start, end)
+    if start is None:
+        for programme in schedule.programmes:
+            for location in programme.locations:
+                for time in location.times:
+                    if not isinstance(time, Time): continue
+                    if start is None or time.actual_time < start: start = time.actual_time
+                    if end is None or (time.actual_time + time.actual_duration) > end: end = (time.actual_time + time.actual_duration)
+    return (start, end)
+
+
 
 class Generator:
 
-    def __init__(self, days, output):
+    def __init__(self, days, output, packet_size, packet_address):
         self.days = days if days else 0
         self.output = output if output else 'output.dat'
+        self.packet_size = packet_size
+        self.packet_address = packet_address
+
+        logger.debug('creating bitstream generator: days=%d, packet_size=%d, packet_address=%d', days, packet_size, packet_address)
 
     def generate_epg(self, responses):
+
         # lets provision a list of the files and encoders that we'll use to assemble the directory 
         # list of tuples: (filename, params, function, args, kwargs)
         objects = []
@@ -141,7 +161,7 @@ class Generator:
                                 f = urllib2.urlopen(pi_url)
                                 data = f.read()
                                 logger.debug('read %d bytes', len(data))
-                                programme_info = unmarshall(data)
+                                programme_info = xml.unmarshall(data)
 
                                 # get the right scope - not entirely clear from the specification how multiple schedules should be handled
                                 # in terms of scope signalling
@@ -155,14 +175,18 @@ class Generator:
                                     if scope_start == None or start < scope_start: scope_start = start
                                     if scope_end == None or end > scope_end: scope_end = end
 
-                                o = MotObject(filename, marshall(programme_info), EpgContentType.PROGRAMME_INFO)
-                                o.add_parameter(ScopeId(bearer)) 
+                                o = MotObject(filename, binary.marshall(programme_info), EpgContentType.PROGRAMME_INFORMATION)
+                                o.add_parameter(ScopeId(bearer.ecc, bearer.eid)) 
                                 o.add_parameter(ScopeStart(scope_start))
                                 o.add_parameter(ScopeEnd(scope_end))
                                 objects.append(o)
 
-                            except: 
-                                logger.warning('could not find PI file at: %s', pi_url)
+                            except urllib2.HTTPError as err:
+                                if err.code == 404:
+                                    logger.warning('could not find PI file at: %s', pi_url)
+                                else:
+                                    logger.exception('error finding PI file at: %s', pi_url)
+
                      
         # prepare the SI file
         service_info = ServiceInfo()
@@ -184,7 +208,7 @@ class Generator:
         logger.debug('encoded to %d datagroups', len(datagroups))
 
         # encode to packets
-        packets = encode_packets(datagroups, address=1, size=96)
+        packets = encode_packets(datagroups, address=self.packet_address, size=self.packet_size)
         logger.debug('encoded to %d packets', len(packets))
 
         # open the output file
@@ -196,20 +220,8 @@ class Generator:
 
 # get the services and applications that the mux config suggests and construct a new virtual SI file
 from odr.radiodns.resolver import resolve_epg
-generator = Generator(days=args.days, output=args.output)
+generator = Generator(days=args.days, output=args.output, packet_size=args.packet_size, packet_address=args.packet_address)
 resolved = resolve_epg(args.f[0], generator.generate_epg)
 
-
-def calculate_scope(schedule): # this should probably be in the main codebase
-    start, end = schedule.scope
-    if start is not None and end is not None: return (start, end)
-    if start is None:
-        for programme in schedule.programmes:
-            for location in programme.locations:
-                for time in location.times:
-                    if not isinstance(time, Time): continue
-                    if start is None or time.actual_time < start: start = time.actual_time
-                    if end is None or (time.actual_time + time.actual_duration) > end: end = (time.actual_time + time.actual_duration)
-    return (start, end)
 
 
