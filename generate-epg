@@ -24,7 +24,7 @@ import string
 import re
 import logging
 
-from spi import DabBearer, IpBearer, Time, ServiceInfo, xml, binary
+from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary
 
 from mot import MotObject, ContentType, SortedHeaderInformation
 from mot.epg import EpgContentType, ScopeId, ScopeStart, ScopeEnd
@@ -129,21 +129,44 @@ class Generator:
                 except: continue # move onto the next SRV record
                 all_services.extend(services)
 
-                # encode service logos
+                # encode service logos and prepare the SI file
                 logger.debug('encoding service logos')
                 for service in services: 
                     logger.debug('encoding service logo for: %s', service)
 
-                    from spi import Multimedia
+		    new_media = [] 
                     for media in filter(lambda m: 
-                        m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) or
+                        m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE, Multimedia.LOGO_UNRESTRICTED) or
                         (m.content in ('image/png', 'image/jpg', 'image/jpeg') and
                          (m.width, m.height) in ((32, 32), (112, 32), (128, 128))), 
                         service.media):
+
+			# create a sensible contentname
+			name = "{service}_{width}_{height}.{extension}".format(
+				service=service.get_name(ShortName.max_length).text.replace(" ", "_"),
+				width=media.width,
+				height=media.height,
+				extension=media.content[media.content.find("/") + 1:])
+			logger.debug('creating MOT image %s from url: %s', name, media.url)
                         
                         # create MOT Object
-                        o = MotObject(media.url, encode_image(media.url), ContentType.IMAGE_PNG if media.content == 'image/png' or media.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) else ContentType.IMAGE_JFIF)
+                        o = MotObject(name, encode_image(media.url), ContentType.IMAGE_PNG if media.content == 'image/png' or media.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) else ContentType.IMAGE_JFIF)
                         objects.append(o)
+
+			# set the name
+			media.url = name
+
+			# set the type
+			if (media.width, media.height) == (32, 32):
+			    media.type = Multimedia.LOGO_COLOUR_SQUARE
+			elif (media.width, media.height) == (112, 32):
+			    media.type = Multimedia.LOGO_COLOUR_RECTANGLE
+			else:
+			    media.type = Multimedia.LOGO_UNRESTRICTED 
+
+			new_media.append(media)
+
+		    service.media = new_media
      
                     # get the relevant bearer for this mux
                     bearer = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)[0]
@@ -192,6 +215,7 @@ class Generator:
         service_info = ServiceInfo()
         logger.debug('preparing the SI file with %d services', len(all_services))
         for service in all_services:
+
             # filter out non DAB/IP bearers
             service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
             service_info.services.append(service)  
