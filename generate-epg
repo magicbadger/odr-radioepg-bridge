@@ -42,6 +42,7 @@ def get_services_for_bearers(bearers, url):
     response = urllib2.urlopen(url)
     unmarshalled = xml.unmarshall(response.read())
     services = filter(lambda s : len(filter(lambda b : b in bearers, s.bearers)) > 0, unmarshalled.services)
+    logger.debug('number of services found %d', len(services))
     if len(services) == 0:
         raise Error('no services found for bearers %s from url %s' % (bearers, url))
     return services
@@ -136,12 +137,23 @@ class Generator:
 
 		    new_media = [] 
                     for media in filter(lambda m: 
-                        m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE, Multimedia.LOGO_UNRESTRICTED) or
-                        (m.content in ('image/png', 'image/jpg', 'image/jpeg') and
-                         (m.width, m.height) in ((32, 32), (112, 32), (128, 128))), 
+                        m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) or
+                        (m.content in ('image/png') and (m.width, m.height) in ((32, 32), (112, 32), (128, 128), (320, 240))), 
                         service.media):
 
+			if media.type == Multimedia.LOGO_COLOUR_SQUARE :
+                             media.content = "image/png"
+                             media.width = 32
+                             media.height = 32
+                        elif media.type == Multimedia.LOGO_COLOUR_RECTANGLE :
+			     media.content = "image/png"
+                             media.width = 112
+                             media.height = 32 
+
+			logger.debug('Width %d and height %d', media.width, media.height)
+
 			# create a sensible contentname
+                        logger.debug('Media content type is %s', media.content)
 			name = "{service}_{width}_{height}.{extension}".format(
 				service=service.get_name(ShortName.max_length).text.replace(" ", "_"),
 				width=media.width,
@@ -179,8 +191,9 @@ class Generator:
                             pi_url = 'http://%s/radiodns/spi/3.1/dab/%03x/%04x/%04x/%d/%s' % (domain, ((bearer.eid >> 4 & 0xf00) + bearer.ecc), bearer.eid, bearer.sid, bearer.scids, day.strftime("%Y%m%d_PI.xml"))
                             try:
                                 day = now + timedelta(days=i)
-                                filename = '%s_PI_%04x' % (day.strftime("%Y%m%d"), bearer.sid)
-                                logger.debug('making request for PI file to: %s', pi_url)
+                                # filename = '%s_PI_%04x' % (day.strftime("%Y%m%d"), bearer.sid)
+				filename = 'w%sd%04xc0.EHA' % (day.strftime("%Y%m%d"), bearer.sid)
+                                logger.debug('making request for PI file to: %s to write out as: %s', pi_url, filename)
                                 f = urllib2.urlopen(pi_url)
                                 data = f.read()
                                 logger.debug('read %d bytes', len(data))
@@ -199,7 +212,7 @@ class Generator:
                                     if scope_end == None or end > scope_end: scope_end = end
 
                                 o = MotObject(filename, binary.marshall(programme_info), EpgContentType.PROGRAMME_INFORMATION)
-                                o.add_parameter(ScopeId(bearer.ecc, bearer.eid)) 
+                                o.add_parameter(ScopeId(bearer.ecc, bearer.eid, sid=bearer.sid, scids=bearer.scids)) 
                                 o.add_parameter(ScopeStart(scope_start))
                                 o.add_parameter(ScopeEnd(scope_end))
                                 objects.append(o)
@@ -212,23 +225,30 @@ class Generator:
 
                      
         # prepare the SI file
+	# filename = 'si.xml'
+	filename = 'e%02x%04xw%s.EIA' % (ecc, eid, now.strftime("%Y%m%d"))
         service_info = ServiceInfo()
-        logger.debug('preparing the SI file with %d services', len(all_services))
+        logger.debug('preparing the SI file with %d services to write out as %s', len(all_services), filename)
         for service in all_services:
 
             # filter out non DAB/IP bearers
-            service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
+            # service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
+            # service_info.services.append(service)  
+
+            # filter out non DAB bearers
+            service.bearers = filter(lambda x: isinstance(x, (DabBearer)), service.bearers)
             service_info.services.append(service)  
 
         # add the SI file 
-        o = MotObject("si.xml", binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)), EpgContentType.SERVICE_INFORMATION)
+        o = MotObject(filename, binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)), EpgContentType.SERVICE_INFORMATION)
         o.add_parameter(ScopeId(ecc, eid))
         objects.append(o)
 
         logger.debug('loaded into %d MOT objects', len(objects))
 
         # encode to datagroups
-        datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
+        # datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
+        datagroups = encode_directorymode(objects, directory_parameters=[])
         logger.debug('encoded to %d datagroups', len(datagroups))
 
         # encode to packets
