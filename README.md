@@ -17,7 +17,7 @@ Creates a DAB EPG bitstream directly from the ODR multiplex configuration file, 
 # Usage
 
 ```
-usage: generate-epg [-h] [-o OUTPUT] [-X] [-d DAYS] f
+usage: generate-epg [-h] [-o OUTPUT] [-X] [-p bytes] [-a address] [-d DAYS] f
 
 Encodes an EPG bitstream for services in a multiplex configuration file
 
@@ -26,9 +26,10 @@ positional arguments:
 
 optional arguments:
   -h, --help  show this help message and exit
-  -o OUTPUT   output bitstream file
+  -o OUTPUT   output bitstream file (default output.dat)
   -X          turn debug on
-  -d DAYS     number of days ahead to encode schedule files
+  -p          size of data packets in bytes (default 96)
+  -a          packet address (default 1)
+  -d DAYS     number of days ahead to encode schedule files (default 2)
 ```
 
-Where the default number of `days` is 2, and the default output file is `output.dat`.
