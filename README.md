@@ -9,7 +9,7 @@ Creates a DAB EPG bitstream directly from the ODR multiplex configuration file, 
 * [odr-radiodns-bridge](https://github.com/nickpiggott/odr-radiodns-bridge)
 * [python-mot](https://github.com/GlobalRadio/python-dabmot)
 * [python-mot-epg](https://github.com/GlobalRadio/python-mot-epg)
-* [python-msc](https://github.com/GlobalRadio/python-dabmsc)
+* [python-msc](https://github.com/nickpiggott/python-dabmsc)
 * [isodate](https://pypi.python.org/pypi/isodate)
 * [bitarray](https://pypi.python.org/pypi/bitarray)
 * [crcmod](https://pypi.python.org/pypi/crcmod)
