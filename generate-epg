@@ -138,7 +138,7 @@ class Generator:
 		    new_media = [] 
                     for media in filter(lambda m: 
                         m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) or
-                        (m.content in ('image/png', 'image/jpg', 'image/jpeg') and (m.width, m.height) in ((32, 32), (112, 32), (128, 128), (320, 240))), 
+                        (m.content in ('image/png') and (m.width, m.height) in ((32, 32), (112, 32), (128, 128), (320, 240))), 
                         service.media):
 
 			if media.type == Multimedia.LOGO_COLOUR_SQUARE :
