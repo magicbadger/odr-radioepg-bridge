@@ -17,7 +17,7 @@ Creates a DAB EPG bitstream directly from the ODR multiplex configuration file, 
 # Usage
 
 ```
-usage: generate-epg [-h] [-o OUTPUT] [-X] [-p bytes] [-a address] [-d DAYS] f
+usage: generate-epg [-h] [-o OUTPUT] [-X] [-p bytes] [-a address] [-d DAYS] [-D] f
 
 Encodes an EPG bitstream for services in a multiplex configuration file
 
