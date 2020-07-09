@@ -31,5 +31,6 @@ optional arguments:
   -p          size of data packets in bytes (default 96)
   -a          packet address (default 1)
   -d DAYS     number of days ahead to encode schedule files (default 2)
+  -D          output as data groups, not packets
 ```
 
