@@ -55,6 +55,8 @@ def encode_image(url):
     response = urllib2.urlopen(url)
     data = response.read()
     logger.debug('read %d bytes of image data', len(data))
+    if len(data) > 16000:
+        logger.debug('WARN: image size is excessive (greater than 16kBytes)')
     return data
 
 parser = argparse.ArgumentParser(description='Encodes an SPI bitstream for services in a multiplex configuration file')
