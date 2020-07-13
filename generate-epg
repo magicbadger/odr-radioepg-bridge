@@ -115,6 +115,11 @@ class Generator:
         all_services = []
 
         logger.debug('responses: %s', responses)
+        
+        if len(responses) == 0:
+            logger.debug('No services found to encode, aborting')
+            return 
+
         for response in responses:
             fqdn = response['fqdn']
             bearers = response['bearers']
