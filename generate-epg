@@ -23,6 +23,7 @@ import random
 import string
 import re
 import logging
+from pprint import pprint
 
 from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary
 
@@ -144,7 +145,15 @@ class Generator:
 
                 # encode service logos and prepare the SI file
                 logger.debug('encoding service logos')
-                for service in services: 
+                for service in services:
+
+		    logger.debug('==== Now working on Station %s =====', service)
+
+		    service.genres = filter(None, service.genres)                                
+
+		    if len(service.genres) == 0:
+			logger.debug('No genres are correctly defined for this station')
+
                     logger.debug('encoding service logo for: %s', service)
 
 		    new_media = [] 
@@ -205,7 +214,7 @@ class Generator:
                                 day = now + timedelta(days=i)
                                 filename = '%s_%02x.%04x.%04x.%01x_PI.xml' % (day.strftime("%Y%m%d"), bearer.ecc, bearer.eid, bearer.sid, bearer.scids)
                                 # Uncomment this next line if you want to use legacy filenames
-				                # filename = 'w%sd%04xc0.EHA' % (day.strftime("%Y%m%d"), bearer.sid)
+				# filename = 'w%sd%04xc0.EHA' % (day.strftime("%Y%m%d"), bearer.sid)
                                 logger.debug('making request for PI file to: %s to write out as: %s', pi_url, filename)
                                 f = urllib2.urlopen(pi_url)
                                 data = f.read()
