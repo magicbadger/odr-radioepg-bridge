@@ -23,7 +23,6 @@ import random
 import string
 import re
 import logging
-from pprint import pprint
 
 from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary
 
