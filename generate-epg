@@ -8,8 +8,8 @@ Feed in a multiplex configuration file and an output bitstream path.
 The mux config will be scanned for services linked to an EPG packet data channel. The service SI files will
 be resolved and demarshalled.
 
-These will then be combined to a multiplex SI file. This is then used to pull back logo files for each service in the 3 
-lowest sizes. Also 2 days PI files. All these are then encoded to an MOT directory bitstream.
+These will then be combined to a multiplex SI file. This is then used to pull back logo files for each service in the 4 
+lowest sizes. Also the specified number of days of PI files. All these are then encoded to an MOT directory bitstream.
 
 """
 
@@ -23,6 +23,10 @@ import random
 import string
 import re
 import logging
+from pprint import pprint
+
+from PIL import Image
+from io import BytesIO
 
 from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary
 
@@ -52,11 +56,20 @@ def get_filename():
 
 def encode_image(url):
     logger.debug('encoding image from %s', url)
-    response = urllib2.urlopen(url)
+    req = urllib2.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    response = urllib2.urlopen(req)
     data = response.read()
     logger.debug('read %d bytes of image data', len(data))
     if len(data) > 16000:
         logger.debug('WARN: image size is excessive (greater than 16kBytes)')
+    image = Image.open(BytesIO(data))
+    image = image.convert("P", palette=Image.ADAPTIVE)
+    compressed = image.save("/tmp/compressed.png", optimize=True)
+    temp = open('/tmp/compressed.png','r')
+    data = temp.read()
+    temp.close()
+    logger.debug('re-sized to %d bytes of image data', len(data))
+	
     return data
 
 parser = argparse.ArgumentParser(description='Encodes an SPI bitstream for services in a multiplex configuration file')
@@ -148,7 +161,7 @@ class Generator:
 
 		    logger.debug('==== Now working on Station %s =====', service)
 
-		    service.genres = filter(None, service.genres)                                
+		    service.genres = filter(None, service.genres)
 
 		    if len(service.genres) == 0:
 			logger.debug('No genres are correctly defined for this station')
