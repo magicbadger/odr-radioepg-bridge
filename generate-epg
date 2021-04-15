@@ -8,8 +8,8 @@ Feed in a multiplex configuration file and an output bitstream path.
 The mux config will be scanned for services linked to an EPG packet data channel. The service SI files will
 be resolved and demarshalled.
 
-These will then be combined to a multiplex SI file. This is then used to pull back logo files for each service in the 3 
-lowest sizes. Also 2 days PI files. All these are then encoded to an MOT directory bitstream.
+These will then be combined to a multiplex SI file. This is then used to pull back logo files for each service in the 4 
+lowest sizes. Also the specified number of days of PI files. All these are then encoded to an MOT directory bitstream.
 
 """
 
@@ -23,6 +23,10 @@ import random
 import string
 import re
 import logging
+from pprint import pprint
+
+from PIL import Image
+from io import BytesIO
 
 from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary
 
@@ -40,8 +44,11 @@ def filter_by_bearer(service):
 def get_services_for_bearers(bearers, url):
     logger.debug('getting services for bearers from %s : %s', url, bearers)
     response = urllib2.urlopen(url)
+    logger.debug('SI successfully opened')
     unmarshalled = xml.unmarshall(response.read())
+    logger.debug('SI successfuly unmarshalled')
     services = filter(lambda s : len(filter(lambda b : b in bearers, s.bearers)) > 0, unmarshalled.services)
+    logger.debug('number of services found %d', len(services))
     if len(services) == 0:
         raise Error('no services found for bearers %s from url %s' % (bearers, url))
     return services
@@ -51,24 +58,37 @@ def get_filename():
 
 def encode_image(url):
     logger.debug('encoding image from %s', url)
-    response = urllib2.urlopen(url)
+    req = urllib2.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    response = urllib2.urlopen(req)
     data = response.read()
     logger.debug('read %d bytes of image data', len(data))
+    if len(data) > 16000:
+        logger.debug('WARN: image size is excessive (greater than 16kBytes)')
+    image = Image.open(BytesIO(data))
+    image = image.convert("P", palette=Image.ADAPTIVE)
+    compressed = image.save("/tmp/compressed.png", optimize=True)
+    temp = open('/tmp/compressed.png','r')
+    data = temp.read()
+    temp.close()
+    logger.debug('re-sized to %d bytes of image data', len(data))
+    
     return data
 
-parser = argparse.ArgumentParser(description='Encodes an EPG bitstream for services in a multiplex configuration file')
+parser = argparse.ArgumentParser(description='Encodes an SPI bitstream for services in a multiplex configuration file')
 parser.add_argument('f',  nargs=1, help='multiplex configuration file')
 parser.add_argument('-o', dest='output', help='output bitstream file')
 parser.add_argument('-X', dest='debug', action='store_true', help='turn debug on')
 parser.add_argument('-d', dest='days', type=int, default=2, help='number of days ahead to encode schedule files')
 parser.add_argument('-p', dest='packet_size', type=int, default=96, help='Packet size in bytes')
 parser.add_argument('-a', dest='packet_address', type=int, default=1, help='Packet address')
+parser.add_argument('-D', dest='datagroup_output', action='store_true', help='output Datagroups instead of Packets')
 args = parser.parse_args()
 
 if args.debug:
     logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('odr.bridge.epg')
 logging.getLogger('spi.binary').setLevel(logging.INFO)
+logging.getLogger('spi.xml').setLevel(logging.DEBUG)
 
 # read in the mux config
 c = open(args.f[0]).read()
@@ -89,13 +109,17 @@ def calculate_scope(schedule): # this should probably be in the main codebase
 
 class Generator:
 
-    def __init__(self, days, output, packet_size, packet_address):
+    def __init__(self, days, output, packet_size, packet_address, datagroup_output):
         self.days = days if days else 0
         self.output = output if output else 'output.dat'
         self.packet_size = packet_size
         self.packet_address = packet_address
+        self.datagroup_output = datagroup_output
 
-        logger.debug('creating bitstream generator: days=%d, packet_size=%d, packet_address=%d', days, packet_size, packet_address)
+        if self.datagroup_output:
+            logger.debug('creating bitstream generator: days=%d, using datagroups', days)       
+        else:
+            logger.debug('creating bitstream generator: days=%d, using packets: packet_size=%d, packet_address=%d', days, packet_size, packet_address)
 
     def generate_epg(self, responses):
 
@@ -107,6 +131,13 @@ class Generator:
         all_services = []
 
         logger.debug('responses: %s', responses)
+        
+        if len(responses) == 0:
+            logger.debug('No services found to encode, aborting')
+            return 
+
+        now = datetime.today()
+
         for response in responses:
             fqdn = response['fqdn']
             bearers = response['bearers']
@@ -131,65 +162,86 @@ class Generator:
 
                 # encode service logos and prepare the SI file
                 logger.debug('encoding service logos')
-                for service in services: 
+                for service in services:
+
+                    logger.debug('==== Now working on Station %s =====', service)
+
+                    service.genres = filter(None, service.genres)
+
+                    if len(service.genres) == 0:
+                        logger.debug('No genres are correctly defined for this station')
+
                     logger.debug('encoding service logo for: %s', service)
 
-		    new_media = [] 
+                    new_media = [] 
                     for media in filter(lambda m: 
-                        m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE, Multimedia.LOGO_UNRESTRICTED) or
-                        (m.content in ('image/png', 'image/jpg', 'image/jpeg') and
-                         (m.width, m.height) in ((32, 32), (112, 32), (128, 128))), 
+                        m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) or
+                        (m.content in ('image/png') and (m.width, m.height) in ((32, 32), (112, 32), (128, 128), (320, 240))), 
                         service.media):
 
-			# create a sensible contentname
-			name = "{service}_{width}_{height}.{extension}".format(
-				service=service.get_name(ShortName.max_length).text.replace(" ", "_"),
-				width=media.width,
-				height=media.height,
-				extension=media.content[media.content.find("/") + 1:])
-			logger.debug('creating MOT image %s from url: %s', name, media.url)
+                        if media.type == Multimedia.LOGO_COLOUR_SQUARE :
+                             media.content = "image/png"
+                             media.width = 32
+                             media.height = 32
+                        elif media.type == Multimedia.LOGO_COLOUR_RECTANGLE :
+                             media.content = "image/png"
+                             media.width = 112
+                             media.height = 32 
+
+                        logger.debug('Width %d and height %d', media.width, media.height)
+   
+                        # create a sensible contentname
+                        logger.debug('Media content type is %s', media.content)
+                        name = "{service}_{width}_{height}.{extension}".format(
+                            service=service.get_name(ShortName.max_length).text.replace(" ", "_"),
+                            width=media.width,
+                            height=media.height,
+                            extension=media.content[media.content.find("/") + 1:])
+                        logger.debug('creating MOT image %s from url: %s', name, media.url)
                         
                         # create MOT Object
                         o = MotObject(name, encode_image(media.url), ContentType.IMAGE_PNG if media.content == 'image/png' or media.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) else ContentType.IMAGE_JFIF)
                         objects.append(o)
 
-			# set the name
-			media.url = name
+                        # set the name
+                        media.url = name
 
-			# set the type
-			if (media.width, media.height) == (32, 32):
-			    media.type = Multimedia.LOGO_COLOUR_SQUARE
-			elif (media.width, media.height) == (112, 32):
-			    media.type = Multimedia.LOGO_COLOUR_RECTANGLE
-			else:
-			    media.type = Multimedia.LOGO_UNRESTRICTED 
+                        # set the type
+                        if (media.width, media.height) == (32, 32):
+                            media.type = Multimedia.LOGO_COLOUR_SQUARE
+                        elif (media.width, media.height) == (112, 32):
+                            media.type = Multimedia.LOGO_COLOUR_RECTANGLE
+                        else:
+                            media.type = Multimedia.LOGO_UNRESTRICTED 
 
-			new_media.append(media)
-
-		    service.media = new_media
+                        new_media.append(media)
+  
+                service.media = new_media
      
-                    # get the relevant bearer for this mux
-                    bearer = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)[0]
+                # get the relevant bearer for this mux
+                bearer = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)[0]
 
-                    # now find PI files
-                    if self.days > 0:
-                        now = datetime.today()
-                        for i in range(0, self.days):
+                # now find PI files
+                if self.days > 0:
+                    for i in range(0, self.days):
+                        day = now + timedelta(days=i)
+                        pi_url = 'http://%s/radiodns/spi/3.1/dab/%03x/%04x/%04x/%01x/%s' % (domain, ((bearer.eid >> 4 & 0xf00) + bearer.ecc), bearer.eid, bearer.sid, bearer.scids, day.strftime("%Y%m%d_PI.xml"))
+                        try:
                             day = now + timedelta(days=i)
-                            pi_url = 'http://%s/radiodns/spi/3.1/dab/%03x/%04x/%04x/%d/%s' % (domain, ((bearer.eid >> 4 & 0xf00) + bearer.ecc), bearer.eid, bearer.sid, bearer.scids, day.strftime("%Y%m%d_PI.xml"))
+                            filename = '%s_%02x.%04x.%04x.%01x_PI.xml' % (day.strftime("%Y%m%d"), bearer.ecc, bearer.eid, bearer.sid, bearer.scids)
+                            # Uncomment this next line if you want to use legacy filenames
+                            # filename = 'w%sd%04xc0.EHA' % (day.strftime("%Y%m%d"), bearer.sid)
+                            logger.debug('making request for PI file to: %s to write out as: %s', pi_url, filename)
+                            f = urllib2.urlopen(pi_url)
+                            data = f.read()
+                            logger.debug('read %d bytes', len(data))
+                            programme_info = xml.unmarshall(data)
+                                
+                            # get the right scope - not entirely clear from the specification how multiple schedules should be handled
+                            # in terms of scope signalling
+                            scope_start = None
+                            scope_end = None
                             try:
-                                day = now + timedelta(days=i)
-                                filename = '%s_PI_%04x' % (day.strftime("%Y%m%d"), bearer.sid)
-                                logger.debug('making request for PI file to: %s', pi_url)
-                                f = urllib2.urlopen(pi_url)
-                                data = f.read()
-                                logger.debug('read %d bytes', len(data))
-                                programme_info = xml.unmarshall(data)
-
-                                # get the right scope - not entirely clear from the specification how multiple schedules should be handled
-                                # in terms of scope signalling
-                                scope_start = None
-                                scope_end = None
                                 for schedule in programme_info.schedules:
                                     start, end = schedule.scope
                                     if scope_start == None or start < scope_start: scope_start = start
@@ -198,54 +250,70 @@ class Generator:
                                     if scope_start == None or start < scope_start: scope_start = start
                                     if scope_end == None or end > scope_end: scope_end = end
 
-                                o = MotObject(filename, binary.marshall(programme_info), EpgContentType.PROGRAMME_INFORMATION)
-                                o.add_parameter(ScopeId(bearer.ecc, bearer.eid)) 
-                                o.add_parameter(ScopeStart(scope_start))
-                                o.add_parameter(ScopeEnd(scope_end))
-                                objects.append(o)
+                                    o = MotObject(filename, binary.marshall(programme_info), EpgContentType.PROGRAMME_INFORMATION)
+                                    o.add_parameter(ScopeId(bearer.ecc, bearer.eid, sid=bearer.sid, scids=bearer.scids)) 
+                                    o.add_parameter(ScopeStart(scope_start))
+                                    o.add_parameter(ScopeEnd(scope_end))
+                                    objects.append(o)
 
-                            except urllib2.HTTPError as err:
-                                if err.code == 404:
-                                    logger.warning('could not find PI file at: %s', pi_url)
-                                else:
-                                    logger.exception('error finding PI file at: %s', pi_url)
+                            except AttributeError:
+                                logger.exception('PI file at: %s is malformed', pi_url)
+
+                        except urllib2.HTTPError as err:
+                            if err.code == 404:
+                                logger.warning('could not find PI file at: %s', pi_url)
+                            else:
+                                logger.exception('error finding PI file at: %s', pi_url)
 
                      
-        # prepare the SI file
-        service_info = ServiceInfo()
-        logger.debug('preparing the SI file with %d services', len(all_services))
-        for service in all_services:
+            # prepare the SI file
+            filename = '%s_%02x.%04x_SI.xml' % (now.strftime("%Y%m%d"),ecc,eid)
+            # Uncomment this next line if you want to use legacy filenames
+            # filename = 'e%02x%04xw%s.EIA' % (ecc, eid, now.strftime("%Y%m%d"))
+            service_info = ServiceInfo()
+            logger.debug('preparing the SI file with %d services to write out as %s', len(all_services), filename)
+            for service in all_services:
+    
+                # filter out non DAB/IP bearers
+                # service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
+                # service_info.services.append(service)  
 
-            # filter out non DAB/IP bearers
-            service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
-            service_info.services.append(service)  
+                # filter out non DAB bearers
+                service.bearers = filter(lambda x: isinstance(x, (DabBearer)), service.bearers)
+                service_info.services.append(service)  
 
-        # add the SI file 
-        o = MotObject("si.xml", binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)), EpgContentType.SERVICE_INFORMATION)
-        o.add_parameter(ScopeId(ecc, eid))
-        objects.append(o)
+            # add the SI file 
+            o = MotObject(filename, binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)), EpgContentType.SERVICE_INFORMATION)
+            o.add_parameter(ScopeId(ecc, eid))
+            objects.append(o)
 
-        logger.debug('loaded into %d MOT objects', len(objects))
+            logger.debug('loaded into %d MOT objects', len(objects))
 
-        # encode to datagroups
-        datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
-        logger.debug('encoded to %d datagroups', len(datagroups))
 
-        # encode to packets
-        packets = encode_packets(datagroups, address=self.packet_address, size=self.packet_size)
-        logger.debug('encoded to %d packets', len(packets))
+            # encode to datagroups
+            datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
+            # datagroups = encode_directorymode(objects, directory_parameters=[])
+            logger.debug('encoded to %d datagroups', len(datagroups))
+        
+            # open the output file
+            if self.datagroup_output:
+                logger.debug('encoded to %d datagroups', len(datagroups))
+                w = open(self.output, 'wb')
+           
+                for datagroup in datagroups:
+                    w.write(datagroup.tobytes())
 
-        # open the output file
-        w = open(self.output, 'wb')
+            else:
+                packets = encode_packets(datagroups, address=self.packet_address, size=self.packet_size)
+                logger.debug('encoded to %d packets', len(packets))
 
-        for packet in packets:
-            w.write(packet.tobytes())
-
+                # open the output file
+                w = open(self.output, 'wb')
+    
+                for packet in packets:
+                    w.write(packet.tobytes())
 
 # get the services and applications that the mux config suggests and construct a new virtual SI file
 from odr.radiodns.resolver import resolve_epg
-generator = Generator(days=args.days, output=args.output, packet_size=args.packet_size, packet_address=args.packet_address)
+generator = Generator(days=args.days, output=args.output, packet_size=args.packet_size, packet_address=args.packet_address, datagroup_output=args.datagroup_output)
 resolved = resolve_epg(args.f[0], generator.generate_epg)
-
-
-
