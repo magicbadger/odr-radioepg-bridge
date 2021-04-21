@@ -196,7 +196,7 @@ class Generator:
                             service=service.get_name(ShortName.max_length).text.replace(" ", "_"),
                             width=media.width,
                             height=media.height,
-                            extension=media.content[media.content.find("/") + 1:])
+                            extension=media.content[media.content.find(u"/") + 1:])
                         logger.debug('creating MOT image %s from url: %s', name, media.url)
                         
                         # create MOT Object
