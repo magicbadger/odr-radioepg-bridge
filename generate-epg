@@ -196,7 +196,7 @@ class Generator:
                             service=service.get_name(ShortName.max_length).text.replace(" ", "_"),
                             width=media.width,
                             height=media.height,
-                            extension=media.content[media.content.find(u"/") + 1:])
+                            extension=media.content[media.content.find("/") + 1:])
                         logger.debug('creating MOT image %s from url: %s', name, media.url)
                         
                         # create MOT Object
@@ -216,54 +216,54 @@ class Generator:
 
                         new_media.append(media)
   
-                service.media = new_media
+                        service.media = new_media
      
-                # get the relevant bearer for this mux
-                bearer = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)[0]
+                        # get the relevant bearer for this mux
+                        bearer = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)[0]
 
-                # now find PI files
-                if self.days > 0:
-                    for i in range(0, self.days):
-                        day = now + timedelta(days=i)
-                        pi_url = 'http://%s/radiodns/spi/3.1/dab/%03x/%04x/%04x/%01x/%s' % (domain, ((bearer.eid >> 4 & 0xf00) + bearer.ecc), bearer.eid, bearer.sid, bearer.scids, day.strftime("%Y%m%d_PI.xml"))
-                        try:
-                            day = now + timedelta(days=i)
-                            filename = '%s_%02x.%04x.%04x.%01x_PI.xml' % (day.strftime("%Y%m%d"), bearer.ecc, bearer.eid, bearer.sid, bearer.scids)
-                            # Uncomment this next line if you want to use legacy filenames
-                            # filename = 'w%sd%04xc0.EHA' % (day.strftime("%Y%m%d"), bearer.sid)
-                            logger.debug('making request for PI file to: %s to write out as: %s', pi_url, filename)
-                            f = urllib2.urlopen(pi_url)
-                            data = f.read()
-                            logger.debug('read %d bytes', len(data))
-                            programme_info = xml.unmarshall(data)
+                        # now find PI files
+                        if self.days > 0:
+                            for i in range(0, self.days):
+                               day = now + timedelta(days=i)
+                               pi_url = 'http://%s/radiodns/spi/3.1/dab/%03x/%04x/%04x/%01x/%s' % (domain, ((bearer.eid >> 4 & 0xf00) + bearer.ecc), bearer.eid, bearer.sid, bearer.scids, day.strftime("%Y%m%d_PI.xml"))
+                               try:
+                                    day = now + timedelta(days=i)
+                                    filename = '%s_%02x.%04x.%04x.%01x_PI.xml' % (day.strftime("%Y%m%d"), bearer.ecc, bearer.eid, bearer.sid, bearer.scids)
+                                    # Uncomment this next line if you want to use legacy filenames
+                                    # filename = 'w%sd%04xc0.EHA' % (day.strftime("%Y%m%d"), bearer.sid)
+                                    logger.debug('making request for PI file to: %s to write out as: %s', pi_url, filename)
+                                    f = urllib2.urlopen(pi_url)
+                                    data = f.read()
+                                    logger.debug('read %d bytes', len(data))
+                                    programme_info = xml.unmarshall(data)
                                 
-                            # get the right scope - not entirely clear from the specification how multiple schedules should be handled
-                            # in terms of scope signalling
-                            scope_start = None
-                            scope_end = None
-                            try:
-                                for schedule in programme_info.schedules:
-                                    start, end = schedule.scope
-                                    if scope_start == None or start < scope_start: scope_start = start
-                                    if scope_end == None or end > scope_end: scope_start = start
-                                    start, end = calculate_scope(schedule)
-                                    if scope_start == None or start < scope_start: scope_start = start
-                                    if scope_end == None or end > scope_end: scope_end = end
+                                    # get the right scope - not entirely clear from the specification how multiple schedules should be handled
+                                    # in terms of scope signalling
+                                    scope_start = None
+                                    scope_end = None
+                                    try:
+                                        for schedule in programme_info.schedules:
+                                            start, end = schedule.scope
+                                            if scope_start == None or start < scope_start: scope_start = start
+                                            if scope_end == None or end > scope_end: scope_start = start
+                                            start, end = calculate_scope(schedule)
+                                            if scope_start == None or start < scope_start: scope_start = start
+                                            if scope_end == None or end > scope_end: scope_end = end
+  
+                                            o = MotObject(filename, binary.marshall(programme_info), EpgContentType.PROGRAMME_INFORMATION)
+                                            o.add_parameter(ScopeId(bearer.ecc, bearer.eid, sid=bearer.sid, scids=bearer.scids)) 
+                                            o.add_parameter(ScopeStart(scope_start))
+                                            o.add_parameter(ScopeEnd(scope_end))
+                                            objects.append(o)
 
-                                    o = MotObject(filename, binary.marshall(programme_info), EpgContentType.PROGRAMME_INFORMATION)
-                                    o.add_parameter(ScopeId(bearer.ecc, bearer.eid, sid=bearer.sid, scids=bearer.scids)) 
-                                    o.add_parameter(ScopeStart(scope_start))
-                                    o.add_parameter(ScopeEnd(scope_end))
-                                    objects.append(o)
+                                    except AttributeError:
+                                        logger.exception('PI file at: %s is malformed', pi_url)
 
-                            except AttributeError:
-                                logger.exception('PI file at: %s is malformed', pi_url)
-
-                        except urllib2.HTTPError as err:
-                            if err.code == 404:
-                                logger.warning('could not find PI file at: %s', pi_url)
-                            else:
-                                logger.exception('error finding PI file at: %s', pi_url)
+                               except urllib2.HTTPError as err:
+                                   if err.code == 404:
+                                       logger.warning('could not find PI file at: %s', pi_url)
+                                   else:
+                                       logger.exception('error finding PI file at: %s', pi_url)
 
                      
             # prepare the SI file
@@ -291,8 +291,8 @@ class Generator:
 
 
             # encode to datagroups
-            datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
-            # datagroups = encode_directorymode(objects, directory_parameters=[])
+            # datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
+            datagroups = encode_directorymode(objects, directory_parameters=[])
             logger.debug('encoded to %d datagroups', len(datagroups))
         
             # open the output file
