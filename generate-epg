@@ -291,8 +291,8 @@ class Generator:
 
 
             # encode to datagroups
-            datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
-            # datagroups = encode_directorymode(objects, directory_parameters=[])
+            # datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
+            datagroups = encode_directorymode(objects, directory_parameters=[])
             logger.debug('encoded to %d datagroups', len(datagroups))
         
             # open the output file
