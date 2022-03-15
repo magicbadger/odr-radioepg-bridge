@@ -16,13 +16,12 @@ lowest sizes. Also the specified number of days of PI files. All these are then 
 import argparse
 import os, sys
 from datetime import datetime, timedelta
-import urllib2
+import urllib
 import logging
 from json import dumps, JSONEncoder
 import random
 import string
 import re
-import logging
 from pprint import pprint
 
 from PIL import Image
@@ -43,14 +42,15 @@ def filter_by_bearer(service):
 
 def get_services_for_bearers(bearers, url):
     logger.debug('getting services for bearers from %s : %s', url, bearers)
-    response = urllib2.urlopen(url)
+    response = urllib.request.urlopen(url)
     logger.debug('SI successfully opened')
-    unmarshalled = xml.unmarshall(response.read())
+    unmarshalled = xml.unmarshall(response.read().decode('utf-8'))
     logger.debug('SI successfuly unmarshalled')
-    services = filter(lambda s : len(filter(lambda b : b in bearers, s.bearers)) > 0, unmarshalled.services)
+
+    services = list(filter(lambda s : len(list(filter(lambda b : b in bearers, s.bearers))) > 0, unmarshalled.services))
     logger.debug('number of services found %d', len(services))
     if len(services) == 0:
-        raise Error('no services found for bearers %s from url %s' % (bearers, url))
+        logger.debug('no services found for bearers %s from url %s',bearers, url)
     return services
 
 def get_filename():
@@ -58,18 +58,18 @@ def get_filename():
 
 def encode_image(url):
     logger.debug('encoding image from %s', url)
-    req = urllib2.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    response = urllib2.urlopen(req)
-    data = response.read()
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    data = urllib.request.urlopen(req).read()
     logger.debug('read %d bytes of image data', len(data))
     if len(data) > 5000:
         logger.debug('WARN: image size is excessive (greater than 5kBytes)')
         image = Image.open(BytesIO(data))
         image = image.convert("P", palette=Image.ADAPTIVE)
         compressed = image.save("/tmp/compressed.png", optimize=True)
-        temp = open('/tmp/compressed.png','r')
+        temp = open('/tmp/compressed.png','rb')
         data = temp.read()
         temp.close()
+        os.remove('/tmp/compressed.png')
         logger.debug('re-sized to %d bytes of image data', len(data))
     
     return data
@@ -94,7 +94,8 @@ logging.getLogger('spi.xml').setLevel(logging.DEBUG)
 c = open(args.f[0]).read()
 
 def calculate_scope(schedule): # this should probably be in the main codebase
-    start, end = schedule.scope
+    start = schedule.scope.start
+    end = schedule.scope.end
     if start is not None and end is not None: return (start, end)
     if start is None:
         for programme in schedule.programmes:
@@ -104,8 +105,6 @@ def calculate_scope(schedule): # this should probably be in the main codebase
                     if start is None or time.actual_time < start: start = time.actual_time
                     if end is None or (time.actual_time + time.actual_duration) > end: end = (time.actual_time + time.actual_duration)
     return (start, end)
-
-
 
 class Generator:
 
@@ -155,9 +154,9 @@ class Generator:
                 domain = server['target'][:-1]
                 url = 'http://%s/radiodns/spi/3.1/SI.xml' % domain 
                 logger.debug('getting SI document from %s', url)
-                try:
-                    services = get_services_for_bearers(bearers, url)
-                except: continue # move onto the next SRV record
+                # try:
+                services = get_services_for_bearers(bearers, url)
+                # except: continue # move onto the next SRV record
                 all_services.extend(services)
 
                 # encode service logos and prepare the SI file
@@ -166,7 +165,7 @@ class Generator:
 
                     logger.debug('==== Now working on Station %s =====', service)
 
-                    service.genres = filter(None, service.genres)
+                    service.genres = list(filter(None, service.genres))
 
                     if len(service.genres) == 0:
                         logger.debug('No genres are correctly defined for this station')
@@ -174,7 +173,7 @@ class Generator:
                     logger.debug('encoding service logo for: %s', service)
 
                     new_media = [] 
-		    logo_count = 1;
+                    logo_count = 1
                     for media in filter(lambda m: 
                         m.type in (Multimedia.LOGO_COLOUR_SQUARE, Multimedia.LOGO_COLOUR_RECTANGLE) or
                         (m.content in ('image/png') and (m.width, m.height) in ((32, 32), (112, 32), (128, 128), (320, 240))), 
@@ -196,7 +195,7 @@ class Generator:
 			    count=logo_count,
                             width=media.width,
                             height=media.height)
- 			logo_count+=1
+                        logo_count+=1
                         logger.debug('creating MOT image %s from url: %s', name, media.url)
                         
                         # create MOT Object
@@ -219,7 +218,9 @@ class Generator:
                     service.media = new_media
      
                     # get the relevant bearer for this mux
-                    bearer = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)[0]
+
+                    bearer = list(filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers))
+                    bearer = bearer[0]
 
                     # now find PI files
                     if self.days > 0:
@@ -232,8 +233,8 @@ class Generator:
                                 # Uncomment this next line if you want to use legacy filenames
                                 # filename = 'w%sd%04xc0.EHA' % (day.strftime("%Y%m%d"), bearer.sid)
                                 logger.debug('making request for PI file to: %s to write out as: %s', pi_url, filename)
-                                f = urllib2.urlopen(pi_url)
-                                data = f.read()
+                                f = urllib.request.urlopen(pi_url)
+                                data = f.read().decode("utf-8")
                                 logger.debug('read %d bytes', len(data))
                                 programme_info = xml.unmarshall(data)
                                 
@@ -243,14 +244,15 @@ class Generator:
                                 scope_end = None
                                 try:
                                     for schedule in programme_info.schedules:
-                                        start, end = schedule.scope
+                                        start = schedule.scope.start
+                                        end = schedule.scope.end
                                         if scope_start == None or start < scope_start: scope_start = start
                                         if scope_end == None or end > scope_end: scope_start = start
                                         start, end = calculate_scope(schedule)
                                         if scope_start == None or start < scope_start: scope_start = start
                                         if scope_end == None or end > scope_end: scope_end = end
   
-                                        o = MotObject(filename, binary.marshall(programme_info), EpgContentType.PROGRAMME_INFORMATION)
+                                        o = MotObject(filename, binary.marshall(programme_info).tobytes(), EpgContentType.PROGRAMME_INFORMATION)
                                         o.add_parameter(ScopeId(bearer.ecc, bearer.eid, sid=bearer.sid, scids=bearer.scids)) 
                                         o.add_parameter(ScopeStart(scope_start))
                                         o.add_parameter(ScopeEnd(scope_end))
@@ -259,7 +261,7 @@ class Generator:
                                 except AttributeError:
                                     logger.exception('PI file at: %s is malformed', pi_url)
 
-                           except urllib2.HTTPError as err:
+                           except urllib.error.HTTPError as err:
                                if err.code == 404:
                                    logger.warning('could not find PI file at: %s', pi_url)
                                else:
@@ -270,48 +272,51 @@ class Generator:
         filename = '%s_%02x.%04x_SI.xml' % (now.strftime("%Y%m%d"),ecc,eid)
         # Uncomment this next line if you want to use legacy filenames
         # filename = 'e%02x%04xw%s.EIA' % (ecc, eid, now.strftime("%Y%m%d"))
-        service_info = ServiceInfo()
-        logger.debug('Preparing the Ensemble SI file with %d services to write out as %s', len(all_services), filename)
-        for service in all_services:
+        if len(all_services) > 0:
+            service_info = ServiceInfo()
+            logger.debug('Preparing the Ensemble SI file with %d services to write out as %s', len(all_services), filename)
+            for service in all_services:
     
-            # filter out non DAB/IP bearers
-            # service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
-            # service_info.services.append(service)  
+                # filter out non DAB/IP bearers
+                # service.bearers = filter(lambda x: isinstance(x, (DabBearer, IpBearer)), service.bearers)
+                # service_info.services.append(service)  
 
-            # filter out non DAB bearers
-            service.bearers = filter(lambda x: isinstance(x, (DabBearer)), service.bearers)
-            service_info.services.append(service)  
+                # filter out non DAB bearers
+                service.bearers = filter(lambda x: isinstance(x, (DabBearer)), service.bearers)
+                service_info.services.append(service)  
 
-        # add the SI file 
-        o = MotObject(filename, binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)), EpgContentType.SERVICE_INFORMATION)
-        o.add_parameter(ScopeId(ecc, eid))
-        objects.append(o)
+            # add the SI file 
+            o = MotObject(filename, binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)).tobytes(), EpgContentType.SERVICE_INFORMATION)
+            o.add_parameter(ScopeId(ecc, eid))
+            objects.append(o)
 
-        logger.debug('loaded into %d MOT objects', len(objects))
+            logger.debug('loaded into %d MOT objects', len(objects))
 
 
-        # encode to datagroups
-        # datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
-        datagroups = encode_directorymode(objects, directory_parameters=[])
-        logger.debug('encoded to %d datagroups', len(datagroups))
-        
-        # open the output file
-        if self.datagroup_output:
+            # encode to datagroups
+            # datagroups = encode_directorymode(objects, directory_parameters=[SortedHeaderInformation()])
+            datagroups = encode_directorymode(objects, directory_parameters=[])
             logger.debug('encoded to %d datagroups', len(datagroups))
-            w = open(self.output, 'wb')
-       
-            for datagroup in datagroups:
-                w.write(datagroup.tobytes())
-
-        else:
-            packets = encode_packets(datagroups, address=self.packet_address, size=self.packet_size)
-            logger.debug('encoded to %d packets', len(packets))
-
+        
             # open the output file
-            w = open(self.output, 'wb')
+            if self.datagroup_output:
+                w = open(self.output, 'wb')
+       
+                for datagroup in datagroups:
+                    w.write(datagroup.tobytes())
+
+            else:
+                packets = encode_packets(datagroups, address=self.packet_address, size=self.packet_size)
+                logger.debug('encoded to %d packets', len(packets))
+
+                # open the output file
+                w = open(self.output, 'wb')
  
-            for packet in packets:
-               w.write(packet.tobytes())
+                for packet in packets:
+                   w.write(packet.tobytes())
+        else:
+            logger.debug('No service content was discovered, no file generated')
+
 
 # get the services and applications that the mux config suggests and construct a new virtual SI file
 from odr.radiodns.resolver import resolve_epg
