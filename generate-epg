@@ -154,9 +154,9 @@ class Generator:
                 domain = server['target'][:-1]
                 url = 'http://%s/radiodns/spi/3.1/SI.xml' % domain 
                 logger.debug('getting SI document from %s', url)
-                # try:
-                services = get_services_for_bearers(bearers, url)
-                # except: continue # move onto the next SRV record
+                try:
+                    services = get_services_for_bearers(bearers, url)
+                except: continue # move onto the next SRV record
                 all_services.extend(services)
 
                 # encode service logos and prepare the SI file
