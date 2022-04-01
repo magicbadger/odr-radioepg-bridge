@@ -16,7 +16,7 @@ lowest sizes. Also the specified number of days of PI files. All these are then 
 import argparse
 import os, sys
 from datetime import datetime, timedelta
-import urllib
+import urllib.request, urllib.error
 import logging
 from json import dumps, JSONEncoder
 import random
