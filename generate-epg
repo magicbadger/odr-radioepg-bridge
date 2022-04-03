@@ -33,7 +33,7 @@ from mot import MotObject, ContentType, SortedHeaderInformation
 from mot.epg import EpgContentType, ScopeId, ScopeStart, ScopeEnd
 
 from msc.datagroups import encode_directorymode
-from msc.packets import encode_packets, PacketSize
+from msc.packets import encode_packets
 
 
 def filter_by_bearer(service):
@@ -320,5 +320,5 @@ class Generator:
 
 # get the services and applications that the mux config suggests and construct a new virtual SI file
 from odr.radiodns.resolver import resolve_epg
-generator = Generator(days=args.days, output=args.output, packet_size=PacketSize(args.packet_size), packet_address=args.packet_address, datagroup_output=args.datagroup_output)
+generator = Generator(days=args.days, output=args.output, packet_size=args.packet_size, packet_address=args.packet_address, datagroup_output=args.datagroup_output)
 resolved = resolve_epg(args.f[0], generator.generate_epg)
