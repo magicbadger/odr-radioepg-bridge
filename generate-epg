@@ -118,7 +118,7 @@ class Generator:
         if self.datagroup_output:
             logger.debug('creating bitstream generator: days=%d, using datagroups', days)       
         else:
-            logger.debug('creating bitstream generator: days=%d, using packets: packet_size=%d, packet_address=%d', days, packet_size.value, packet_address)
+            logger.debug('creating bitstream generator: days=%d, using packets: packet_size=%d, packet_address=%d', days, packet_size, packet_address)
 
     def generate_epg(self, responses):
 
