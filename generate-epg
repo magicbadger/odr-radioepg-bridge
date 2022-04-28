@@ -263,7 +263,7 @@ class Generator:
 
                            except urllib.error.HTTPError as err:
                                if err.code == 404:
-                                   logger.warning('could not find PI file at: %s', pi_url)
+                                   logger.debug('could not find PI file at: %s', pi_url)
                                else:
                                    logger.exception('error finding PI file at: %s', pi_url)
 
