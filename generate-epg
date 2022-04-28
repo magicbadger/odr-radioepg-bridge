@@ -219,8 +219,7 @@ class Generator:
      
                     # get the relevant bearer for this mux
 
-                    bearer = list(filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers))
-                    bearer = bearer[0]
+                    bearer = list(filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers))[0]
 
                     # now find PI files
                     if self.days > 0:
@@ -251,7 +250,7 @@ class Generator:
                                         start, end = calculate_scope(schedule)
                                         if scope_start == None or start < scope_start: scope_start = start
                                         if scope_end == None or end > scope_end: scope_end = end
-  
+ 
                                         o = MotObject(filename, binary.marshall(programme_info).tobytes(), EpgContentType.PROGRAMME_INFORMATION)
                                         o.add_parameter(ScopeId(bearer.ecc, bearer.eid, sid=bearer.sid, scids=bearer.scids)) 
                                         o.add_parameter(ScopeStart(scope_start))
@@ -282,7 +281,10 @@ class Generator:
                 # service_info.services.append(service)  
 
                 # filter out non DAB bearers
-                service.bearers = filter(lambda x: isinstance(x, (DabBearer)), service.bearers)
+                # service.bearers = filter(lambda x: isinstance(x, DabBearer), service.bearers)
+
+                # find only the bearer for this multiplex
+                service.bearers = filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers)
                 service_info.services.append(service)  
 
             # add the SI file 
