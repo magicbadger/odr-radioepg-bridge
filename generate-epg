@@ -255,6 +255,10 @@ class Generator:
                                         # here we force the schedule/scope/serviceScope to be the current bearer, regardless
                                         schedule_info.scope.bearers = []
                                         schedule_info.scope.bearers.append(bearer)
+
+                                        # and update the start/end times to reflect the schedule times
+                                        schedule_info.scope.start = scope_start
+                                        schedule_info.scope.end = scope_end
                                         programme_info.schedules[0] = schedule_info
 
                                         o = MotObject(filename, binary.marshall(programme_info).tobytes(), EpgContentType.PROGRAMME_INFORMATION)
