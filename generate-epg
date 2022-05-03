@@ -236,11 +236,12 @@ class Generator:
                                 data = f.read().decode("utf-8")
                                 logger.debug('read %d bytes', len(data))
                                 programme_info = xml.unmarshall(data)
+                                schedule_info = programme_info.schedules[0]
                                 
                                 # get the right scope - not entirely clear from the specification how multiple schedules should be handled
                                 # in terms of scope signalling
-                                scope_start = None
-                                scope_end = None
+                                scope_start = schedule_info.scope.start
+                                scope_end = schedule_info.scope.end
                                 try:
                                     for schedule in programme_info.schedules:
                                         start = schedule.scope.start
@@ -250,7 +251,16 @@ class Generator:
                                         start, end = calculate_scope(schedule)
                                         if scope_start == None or start < scope_start: scope_start = start
                                         if scope_end == None or end > scope_end: scope_end = end
- 
+
+                                        # here we force the schedule/scope/serviceScope to be the current bearer, regardless
+                                        schedule_info.scope.bearers = []
+                                        schedule_info.scope.bearers.append(bearer)
+
+                                        # and update the start/end times to reflect the schedule times
+                                        schedule_info.scope.start = scope_start
+                                        schedule_info.scope.end = scope_end
+                                        programme_info.schedules[0] = schedule_info
+
                                         o = MotObject(filename, binary.marshall(programme_info).tobytes(), EpgContentType.PROGRAMME_INFORMATION)
                                         o.add_parameter(ScopeId(bearer.ecc, bearer.eid, sid=bearer.sid, scids=bearer.scids)) 
                                         o.add_parameter(ScopeStart(scope_start))
