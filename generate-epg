@@ -27,7 +27,7 @@ from pprint import pprint
 from PIL import Image
 from io import BytesIO
 
-from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary
+from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary, ShortDescription, LongDescription
 
 from mot import MotObject, ContentType, SortedHeaderInformation
 from mot.epg import EpgContentType, ScopeId, ScopeStart, ScopeEnd
@@ -87,7 +87,7 @@ args = parser.parse_args()
 if args.debug:
     logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('odr.bridge.epg')
-logging.getLogger('spi.binary').setLevel(logging.INFO)
+logging.getLogger('spi.binary').setLevel(logging.DEBUG)
 logging.getLogger('spi.xml').setLevel(logging.DEBUG)
 
 # read in the mux config
@@ -237,7 +237,7 @@ class Generator:
                                 logger.debug('read %d bytes', len(data))
                                 programme_info = xml.unmarshall(data)
                                 schedule_info = programme_info.schedules[0]
-                                
+
                                 # get the right scope - not entirely clear from the specification how multiple schedules should be handled
                                 # in terms of scope signalling
                                 scope_start = schedule_info.scope.start
@@ -252,6 +252,14 @@ class Generator:
                                         if scope_start == None or start < scope_start: scope_start = start
                                         if scope_end == None or end > scope_end: scope_end = end
 
+                                        # if there are no SHORT descriptions, form them from suitable length LONG descriptions
+                                        for programme in schedule.programmes:
+                                            if len(list(filter(lambda x : isinstance(x, ShortDescription), programme.descriptions))) == 0:
+                                                long_descriptions = list(filter(lambda x : isinstance(x, LongDescription) and len(x.text) <= 180, programme.descriptions))
+                                                for long_description in long_descriptions:
+                                                    programme.descriptions.append(ShortDescription(long_description.text))
+
+ 
                                         # here we force the schedule/scope/serviceScope to be the current bearer, regardless
                                         schedule_info.scope.bearers = []
                                         schedule_info.scope.bearers.append(bearer)
