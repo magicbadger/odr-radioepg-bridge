@@ -27,7 +27,7 @@ from pprint import pprint
 from PIL import Image
 from io import BytesIO
 
-from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, xml, binary, ShortDescription, LongDescription
+from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, MediumName, xml, binary, ShortDescription, LongDescription, binary
 
 from mot import MotObject, ContentType, SortedHeaderInformation
 from mot.epg import EpgContentType, ScopeId, ScopeStart, ScopeEnd
@@ -108,12 +108,17 @@ def calculate_scope(schedule): # this should probably be in the main codebase
 
 class Generator:
 
-    def __init__(self, days, output, packet_size, packet_address, datagroup_output):
+    def __init__(self, days, output, packet_size, packet_address, datagroup_output, ecc, eid, label, shortlabel):
         self.days = days if days else 0
         self.output = output if output else 'output.dat'
         self.packet_size = packet_size
         self.packet_address = packet_address
         self.datagroup_output = datagroup_output
+        self.ecc = ecc
+        self.eid = eid
+        self.label = label
+        self.shortlabel = shortlabel
+
 
         if self.datagroup_output:
             logger.debug('creating bitstream generator: days=%d, using datagroups', days)       
@@ -141,10 +146,6 @@ class Generator:
             fqdn = response['fqdn']
             bearers = response['bearers']
             servers = response['servers']
-
-            # lets take a snapshot of ensemble ECC and EId right now, but should really take this from the mux config
-            ecc = bearers[0].ecc
-            eid = bearers[0].eid
 
             # sort servers in priority (lowest), weighting highest
             servers = sorted(servers, key=lambda x: (-x['priority'], x['weight']))
@@ -307,7 +308,9 @@ class Generator:
                 service_info.services.append(service)  
 
             # add the SI file 
-            o = MotObject(filename, binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid)).tobytes(), EpgContentType.SERVICE_INFORMATION)
+            ensemble_label = MediumName(label)
+            ensemble_shortlabel = ShortName(shortlabel)
+            o = MotObject(filename, binary.marshall(service_info, ensemble=binary.Ensemble(ecc, eid, names=[ensemble_label,ensemble_shortlabel])).tobytes(), EpgContentType.SERVICE_INFORMATION)
             o.add_parameter(ScopeId(ecc, eid))
             objects.append(o)
 
@@ -340,6 +343,7 @@ class Generator:
 
 
 # get the services and applications that the mux config suggests and construct a new virtual SI file
-from odr.radiodns.resolver import resolve_epg
-generator = Generator(days=args.days, output=args.output, packet_size=args.packet_size, packet_address=args.packet_address, datagroup_output=args.datagroup_output)
+from odr.radiodns.resolver import resolve_epg, parse_mux_ensemble
+ecc, eid, label, shortlabel = parse_mux_ensemble(args.f[0])
+generator = Generator(days=args.days, output=args.output, packet_size=args.packet_size, packet_address=args.packet_address, datagroup_output=args.datagroup_output,ecc=ecc,eid=eid,label=label,shortlabel=shortlabel)
 resolved = resolve_epg(args.f[0], generator.generate_epg)
