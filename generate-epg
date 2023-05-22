@@ -27,7 +27,7 @@ from pprint import pprint
 from PIL import Image
 from io import BytesIO
 
-from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, MediumName, xml, binary, ShortDescription, LongDescription, binary
+from spi import DabBearer, IpBearer, Time, ServiceInfo, Multimedia, ShortName, MediumName, xml, binary, ShortDescription, LongDescription
 
 from mot import MotObject, ContentType, SortedHeaderInformation
 from mot.epg import EpgContentType, ScopeId, ScopeStart, ScopeEnd
