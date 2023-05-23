@@ -223,7 +223,7 @@ class Generator:
                     bearer = list(filter(lambda x: isinstance(x, DabBearer) and x.ecc == ecc and x.eid == eid, service.bearers))[0]
 
                     # now find PI files
-                    if self.days > 0 and bearer.sid != 0xcdc2 :
+                    if self.days > 0 :
                         for i in range(0, self.days):
                            day = now + timedelta(days=i)
                            pi_url = 'http://%s/radiodns/spi/3.1/dab/%03x/%04x/%04x/%01x/%s' % (domain, ((bearer.sid >> 4 & 0xf00) + bearer.ecc), bearer.eid, bearer.sid, bearer.scids, day.strftime("%Y%m%d_PI.xml"))
