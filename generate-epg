@@ -136,10 +136,6 @@ class Generator:
 
         logger.debug('responses: %s', responses)
         
-#        if len(responses) == 0:
-#           logger.debug('No services found to encode, aborting')
-#            return 
-
         now = datetime.today()
 
         for response in responses:
